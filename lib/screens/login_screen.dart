@@ -1,93 +1,45 @@
-// screens/login_screen.dart
-import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
-
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  @override State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isLoading = false;
-  String? _error;
+  final _email = TextEditingController();
+  final _senha = TextEditingController();
+  bool _loading = false;
 
   Future<void> _login() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
+    setState(() => _loading = true);
     try {
       await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
-        password: _passwordController.text.trim(),
+        email: _email.text.trim(),
+        password: _senha.text,
       );
-      // Sucesso: StreamBuilder em AuthCheck vai redirecionar
-    } on FirebaseAuthException catch (e) {
-      setState(() {
-        _error = switch (e.code) {
-          'user-not-found' => 'Usuário não encontrado',
-          'wrong-password' => 'Senha incorreta',
-          'invalid-email' => 'Email inválido',
-          _ => 'Erro: ${e.message}',
-        };
-      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erro: $e")));
     } finally {
-      setState(() => _isLoading = false);
+      setState(() => _loading = false);
     }
-  }
-
-  @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Login do Dono')),
+      appBar: AppBar(title: const Text("Login")),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _passwordController,
-              decoration: const InputDecoration(
-                labelText: 'Senha',
-                border: OutlineInputBorder(),
-              ),
-              obscureText: true,
-            ),
+            TextField(decoration: const InputDecoration(labelText: "Email"), controller: _email),
+            TextField(decoration: const InputDecoration(labelText: "Senha"), controller: _senha, obscureText: true),
             const SizedBox(height: 20),
-            if (_error != null)
-              Text(_error!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: _isLoading ? null : _login,
-              child: _isLoading
-                  ? const CircularProgressIndicator()
-                  : const Text('Entrar'),
-            ),
+            _loading ? const CircularProgressIndicator() : ElevatedButton(onPressed: _login, child: const Text("Entrar")),
           ],
         ),
       ),
     );
   }
-
 }

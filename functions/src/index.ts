@@ -1,117 +1,75 @@
-import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { onCall, onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
+import { setGlobalOptions } from "firebase-functions";
 admin.initializeApp();
+const db = admin.firestore();
 
-/**
- * Gera um link temporário para acesso público aos dados compartilhados
- * Duração máxima: 7 dias (10080 minutos)
- */
-export const createTempLink = onCall(
-  {
-    region: "southamerica-east1",
-    memory: "256MiB",
-    timeoutSeconds: 60,
-  },
+// DESATIVA APP CHECK (APENAS TESTE)
+setGlobalOptions({ enforceAppCheck: false });
+
+export const gerarLinkTemporario = onCall(
+  { region: "southamerica-east1" },
   async (request) => {
-    // 1. Verifica se o usuário está logado
-    if (!request.auth?.uid) {
-      throw new HttpsError("unauthenticated", "Você precisa estar logado para gerar um link.");
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new Error("Usuário não autenticado");
     }
 
-    const uid = request.auth.uid;
-    const data = request.data as { docId: string; minutes?: number };
-
-    // 2. Valida parâmetros
-    if (!data.docId) {
-      throw new HttpsError("invalid-argument", "docId é obrigatório.");
+    const userSnap = await db.collection("users").doc(uid).get();
+    if (!userSnap.exists || userSnap.data()?.role !== "admin") {
+      throw new Error("Apenas admin pode gerar links");
     }
 
-    const minutes = data.minutes ?? 5;
-    if (minutes <= 0 || minutes > 10080) {
-      throw new HttpsError(
-        "invalid-argument",
-        "Duração deve ser entre 1 minuto e 7 dias (10080 minutos)."
-      );
-    }
-
-    // 3. Gera ID único e seguro
-    const accessId = `${uid}_${data.docId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-    // 4. Calcula expiração
+    const tempUid = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const expiresAt = admin.firestore.Timestamp.fromDate(
-      new Date(Date.now() + minutes * 60 * 1000)
+      new Date(Date.now() + 24 * 60 * 60 * 1000) // 24h
     );
 
-    // 5. Salva no Firestore
-    await admin.firestore().collection("tempAccess").doc(accessId).set({
-      targetUid: uid,
-      docId: data.docId,
+    await db.collection("users").doc(tempUid).set({
+      uid: tempUid,
+      role: "cliente",
+      isExterno: true,
+      criadoPor: uid,
       expiresAt,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      durationMinutes: minutes,
+      criadoEm: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // 6. Monta URL do link
-    const webUrl = `https://app-innovaro-showcase.web.app/?aid=${accessId}`;
-
-    console.log(`Link gerado para UID: ${uid}, docId: ${data.docId}, expira em ${minutes} min`);
-
-    // 7. Retorna o link
-    return {
-      url: webUrl,
-      accessId,
-      expiresAt: expiresAt.toDate().toISOString(),
-      duration: `${minutes} minutos`,
-    };
+    const url = `https://app-innovaro-showcase.web.app/?temp=${tempUid}`;
+    return { url }; // <-- RETORNA URL!
   }
 );
 
-// 2. getTempToken → PÚBLICA via HTTP
-export const getTempToken = onRequest(
-  {
-    region: "southamerica-east1",
-    cors: true,
-  },
-  // teste
+/* 2. CLIENTE EXTERNO ACESSA LINK */
+export const getTokenTemporario = onRequest(
+  { region: "southamerica-east1", cors: true },
   async (req, res) => {
-    try {
-      console.log("getTempToken chamado com query:", req.query);
-
-      const accessId = req.query.accessId as string;
-
-      if (!accessId) {
-        console.log("Erro: accessId ausente");
-        res.status(400).json({ error: "Parâmetro 'accessId' é obrigatório" });
-        return;
-      }
-
-      console.log("Buscando tempAccess:", accessId);
-      const snap = await admin.firestore().collection("tempAccess").doc(accessId).get();
-
-      if (!snap.exists) {
-        console.log("tempAccess não encontrado");
-        res.status(404).json({ error: "Link inválido" });
-        return;
-      }
-
-      const info = snap.data()!;
-      console.log("Dados encontrados:", info);
-
-      if (info.expiresAt.toDate() < new Date()) {
-        console.log("Link expirado");
-        res.status(410).json({ error: "Link expirado" });
-        return;
-      }
-
-      const token = await admin.auth().createCustomToken(info.targetUid, {
-        tempAccessId: accessId,
-      });
-
-      console.log("Token gerado com sucesso");
-      res.json({ token });
-    } catch (error: any) {
-      console.error("ERRO CRÍTICO em getTempToken:", error);
-      res.status(500).json({ error: "Erro interno do servidor" });
+    const { temp } = req.query;
+    if (!temp) {
+      res.status(400).json({ error: "temp ausente" });
+      return;
     }
+
+    const doc = await db.collection("users").doc(temp as string).get();
+    if (!doc.exists) {
+      res.status(404).json({ error: "Link inválido" });
+      return;
+    }
+
+    const data = doc.data()!;
+    if (data.expiresAt.toDate() < new Date()) {
+      await doc.ref.delete();
+      res.status(410).json({ error: "Link expirado" });
+      return;
+    }
+
+    const token = await admin.auth().createCustomToken(temp as string, {
+      tempAccess: true,
+      role: "cliente",
+      isExterno: true,
+      criadoPor: data.criadoPor,
+    });
+
+    res.json({ token });
+    return;
   }
 );
