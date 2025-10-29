@@ -13,11 +13,3 @@ key.properties
 **/*.keystore
 **/*.jks
 
-# Flutter/Dart build outputs
-build/
-.flutter-plugins
-.flutter-plugins-dependencies
-.packages
-.dart_tool/
-.idea/
-android/.gradle/
