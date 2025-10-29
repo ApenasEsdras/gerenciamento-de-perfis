@@ -6,3 +6,4 @@ build/
 .dart_tool/
 .idea/
 android/.gradle/
+lib/firebase_options.dart
