@@ -1,76 +1,13 @@
-// import 'package:appinncatalogo/screens/cliente_screen.dart';
-// import 'package:appinncatalogo/screens/access_temp_screen.dart';
-// import 'package:cloud_firestore/cloud_firestore.dart';
-// import 'package:firebase_auth/firebase_auth.dart';
-// import 'package:firebase_core/firebase_core.dart';
-// import 'package:flutter/foundation.dart';
-// import 'package:flutter/material.dart';
-// import 'firebase_options.dart';
-// import 'screens/login_screen.dart';
-// import 'screens/admin_screen.dart';
-// import 'screens/revendedor_screen.dart';
-
-
-// void main() async {
-//   WidgetsFlutterBinding.ensureInitialized();
-//   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-//   runApp(const MyApp());
-// }
-
-// class MyApp extends StatelessWidget {
-//   const MyApp({super.key});
-//   @override
-//   Widget build(BuildContext context) {
-//     return MaterialApp(
-//       title: 'Catálogo Simples',
-//       theme: ThemeData(primarySwatch: Colors.blue),
-//       home: kIsWeb
-//           ? (Uri.base.queryParameters['temp'] != null
-//               ? AccessTempScreen(tempUid: Uri.base.queryParameters['temp']!)
-//               : const AuthWrapper())
-//           : const AuthWrapper(),
-//       debugShowCheckedModeBanner: false,
-//     );
-//   }
-// }
-
-// class AuthWrapper extends StatelessWidget {
-//   const AuthWrapper({super.key});
-//   @override
-//   Widget build(BuildContext context) {
-//     return StreamBuilder(
-//       stream: FirebaseAuth.instance.authStateChanges(),
-//       builder: (context, snapshot) {
-//         if (snapshot.connectionState == ConnectionState.waiting) {
-//           return const Scaffold(body: Center(child: CircularProgressIndicator()));
-//         }
-//         if (!snapshot.hasData) return const LoginScreen();
-
-//         final uid = snapshot.data!.uid;
-//         return FutureBuilder<Map<String, dynamic>?>(
-//           future: FirebaseFirestore.instance.collection('users').doc(uid).get().then((s) => s.data()),
-//           builder: (context, snap) {
-//             if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-//             final role = snap.data?['role'] ?? 'cliente';
-//             if (role == 'admin') return const AdminScreen();
-//             if (role == 'revendedor') return const RevendedorScreen();
-//             return const ClienteScreen();
-//           },
-//         );
-//       },
-//     );
-//   }
-// }
-
-
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart';
+import 'package:appinncatalogo/firebase_options.dart';
+import 'package:appinncatalogo/screens/catalog_share_screen.dart';
+import 'package:appinncatalogo/screens/home_screen.dart';
+import 'package:appinncatalogo/screens/login_screen.dart';
 import 'package:flutter/material.dart';
-import 'firebase_options.dart';
-import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';          // <-- nova tela única
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:app_links/app_links.dart'; // PACOTE CORRETO
+
+import 'dart:async';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -78,23 +15,64 @@ void main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  final _appLinks = AppLinks();
+  StreamSubscription<Uri>? _linkSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinkListener();
+  }
+
+  @override
+  void dispose() {
+    _linkSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _initDeepLinkListener() async {
+    // 1. LINK INICIAL (ao abrir o app via link)
+    final initialLink = await _appLinks.getInitialLink(); // String?
+    if (initialLink != null) {
+      final uri = Uri.tryParse(initialLink as String);
+      if (uri != null) _handleDeepLink(uri);
+    }
+
+    // 2. ESCUTA LINKS EM TEMPO REAL (quando o app já está aberto)
+    _linkSubscription = _appLinks.uriLinkStream.listen(_handleDeepLink);
+  }
+
+  void _handleDeepLink(Uri uri) {
+    if (uri.host == 'app-innovaro-showcase.web.app' &&
+        uri.path.startsWith('/share/')) {
+      final linkId = uri.pathSegments.last;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => CatalogShareScreen(linkId: linkId)),
+        (route) => false,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Catálogo Simples',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      debugShowCheckedModeBanner: false,
+      title: 'Catálogos',
+      theme: ThemeData(primarySwatch: Colors.indigo),
       home: const AuthWrapper(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
 
-/// ---------------------------------------------------------------
-/// AuthWrapper – decide entre Login ou HomeScreen
-/// ---------------------------------------------------------------
+// Controla autenticação
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
@@ -103,18 +81,12 @@ class AuthWrapper extends StatelessWidget {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        // 1. Ainda carregando
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
-
-        // 2. Não logado → Login
-        if (!snapshot.hasData) {
-          return const LoginScreen();
-        }
-
-        // 3. Logado → HomeScreen (única tela que se adapta)
-        return const HomeScreen();
+        return snapshot.hasData ? const HomeScreen() : const LoginScreen();
       },
     );
   }

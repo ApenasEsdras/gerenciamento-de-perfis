@@ -1,136 +1,170 @@
 // screens/home_screen.dart
+import 'package:appinncatalogo/screens/cadastro.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
-  Future<void> _gerarLink(BuildContext context) async {
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  String? userRole;
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserRole();
+  }
+
+  Future<void> _loadUserRole() async {
+    final user = FirebaseAuth.instance.currentUser!;
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    setState(() {
+      userRole = doc.data()?['isPerfil'];
+      isLoading = false;
+    });
+  }
+
+  Future<void> _shareCatalog(String catalogId, String catalogName) async {
+    if (userRole != 'admin' && userRole != 'revendedor') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Você não tem permissão para compartilhar."),
+        ),
+      );
+      return;
+    }
+
     try {
-      final functions = FirebaseFunctions.instanceFor(region: 'southamerica-east1');
-      final result = await functions.httpsCallable('gerarLinkTemporario').call();
-      final url = result.data['url'] as String;
+      final callable = FirebaseFunctions.instanceFor(
+        region: 'southamerica-east1',
+      ).httpsCallable('generateCatalogLink');
+      final result = await callable.call({'catalogId': catalogId});
+      final link = result.data['link'];
 
       await Share.share(
-        'Acesse os produtos em: $url',
-        subject: 'Link Temporário de Acesso',
+        'Confira o catálogo *$catalogName*:\n\n$link\n\nVálido por 24h',
+        subject: catalogName,
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Erro ao gerar link: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Erro: $e")));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser!;
-    final isExterno = user.uid.startsWith('temp_');
+    if (isLoading)
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isExterno ? "Acesso Temporário" : "Catálogo"),
+        title: Text(
+          userRole == 'admin'
+              ? "Admin"
+              : userRole == 'revendedor'
+              ? "Revendedor"
+              : "Cliente",
+        ),
         actions: [
+          if (userRole == 'admin')
+            IconButton(
+              icon: const Icon(Icons.person_add),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CadastroUsuarioScreen(),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () => FirebaseAuth.instance.signOut(),
           ),
         ],
       ),
-      body: FutureBuilder<DocumentSnapshot>(
-        future: FirebaseFirestore.instance.collection('users').doc(user.uid).get(),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('catalogos')
+            .orderBy('name')
+            .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.hasError)
+            return Center(child: Text("Erro: ${snapshot.error}"));
+          if (!snapshot.hasData)
             return const Center(child: CircularProgressIndicator());
+
+          final docs = snapshot.data!.docs;
+          if (docs.isEmpty) {
+            return const Center(child: Text("Nenhum catálogo disponível."));
           }
 
-          if (!snapshot.hasData || !snapshot.data!.exists) {
-            return const Center(child: Text("Erro ao carregar perfil"));
-          }
+          return ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              final data = docs[index].data() as Map<String, dynamic>;
+              final name = data['name'] ?? 'Sem nome';
+              final items =
+                  (data['items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
-          final data = snapshot.data!.data() as Map<String, dynamic>;
-          final role = data['role'] ?? 'cliente';
-          final criadoPorUid = data['criadoPor'] as String?;
-          final expiresAt = (data['expiresAt'] as Timestamp?)?.toDate();
+              final canShare = userRole == 'admin' || userRole == 'revendedor';
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                // === TÍTULO DO PERFIL ===
-                Text(
-                  switch (role) {
-                    'admin' => "ADMINISTRADOR",
-                    'revendedor' => "REVENDEDOR",
-                    _ => isExterno ? "CLIENTE EXTERNO" : "CLIENTE",
-                  },
-                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 20),
-
-                // === INFORMAÇÕES DO ACESSO EXTERNO ===
-                if (isExterno) ...[
-                  FutureBuilder<DocumentSnapshot>(
-                    future: criadoPorUid != null
-                        ? FirebaseFirestore.instance.collection('users').doc(criadoPorUid).get()
-                        : null,
-                    builder: (context, adminSnap) {
-                      final adminNome = (adminSnap.hasData && adminSnap.data!.exists)
-                          ? ((adminSnap.data!.data() as Map<String, dynamic>)['nome'] ?? 'Admin')
-                          : 'Carregando...';
-                      return Column(
-                        children: [
-                          Text("Liberado por: $adminNome", style: const TextStyle(fontSize: 16)),
-                          const SizedBox(height: 8),
-                          if (expiresAt != null)
-                            Text(
-                              "Válido até: ${DateFormat('dd/MM HH:mm').format(expiresAt)}",
-                              style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+              return Card(
+                child: ExpansionTile(
+                  leading: const Icon(Icons.inventory_2),
+                  title: Text(
+                    name,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text("${items.length} itens"),
+                  trailing: canShare
+                      ? IconButton(
+                          icon: const Icon(Icons.share, color: Colors.indigo),
+                          onPressed: () => _shareCatalog(docs[index].id, name),
+                        )
+                      : null,
+                  children: items.map((item) {
+                    return ListTile(
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: CachedNetworkImage(
+                          imageUrl: item['imageUrl'] ?? '',
+                          width: 50,
+                          height: 50,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) => const SizedBox(
+                            width: 50,
+                            height: 50,
+                            child: Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             ),
-                        ],
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 30),
-                ],
-
-                // === BOTÃO PARA ADMIN ===
-                if (role == 'admin') ...[
-                  ElevatedButton.icon(
-                    onPressed: () => _gerarLink(context),
-                    icon: const Icon(Icons.link),
-                    label: const Text("Gerar Link Temporário (24h)"),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-                ],
-
-                // === CONTEÚDO PERSONALIZADO (exemplo) ===
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        const Text("Bem-vindo!  ", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 8),
-                        Text(switch (role) {
-                          'admin' => "Você gerencia o catálogo e acessos temporários.",
-                          'revendedor' => "Você tem acesso aos produtos para revenda.",
-                          _ => "Explore o catálogo de produtos.",
-                        }),
-                      ],
-                    ),
-                  ),
+                          ),
+                        ),
+                      ),
+                      title: Text(item['name'] ?? ''),
+                      subtitle: Text(
+                        "R\$ ${(item['price'] as num?)?.toStringAsFixed(2) ?? '0.00'}\n"
+                        "Tam: ${(item['sizes'] as List?)?.join(', ') ?? 'N/A'}",
+                      ),
+                      isThreeLine: true,
+                    );
+                  }).toList(),
                 ),
-              ],
-            ),
+              );
+            },
           );
         },
       ),
