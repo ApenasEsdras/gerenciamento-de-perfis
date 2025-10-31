@@ -23,7 +23,7 @@ class _CadastroUsuarioScreenState extends State<CadastroUsuarioScreen> {
 
     try {
       final callable = FirebaseFunctions.instanceFor(
-        region: 'southamerica-east1',
+        region: 'us-central1',
       ).httpsCallable('cadastrarUsuario');
       await callable.call({
         'email': _emailCtrl.text.trim(),

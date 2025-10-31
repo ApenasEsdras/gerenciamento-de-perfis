@@ -1,85 +1,41 @@
+// ========================================
+// 1. GERAR LINK TEMPORÁRIO (Admin/Revendedor)
+// ========================================
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-import { Request, Response } from "express";
 
 admin.initializeApp();
 const db = admin.firestore();
 
-export const generateCatalogLinkHttp = onRequest(
-  { cors: true },
-  async (req: Request, res: Response) => {
-    try {
-      // -------------------------------------------------
-      // 1. Verifica o header Authorization
-      // -------------------------------------------------
-      const authHeader = req.headers.authorization;
-      if (!authHeader?.startsWith("Bearer ")) {
-        res.status(401).json({ error: "Token ausente" });
-        return;                     // <-- sai da função
-      }
+export const generateCatalogLink = onCall(async (request) => {
+  const { auth, data } = request;
+  if (!auth?.uid) throw new HttpsError("unauthenticated", "Login necessário.");
 
-      const idToken = authHeader.split("Bearer ")[1];
-
-      // -------------------------------------------------
-      // 2. Verifica o token
-      // -------------------------------------------------
-      let decoded;
-      try {
-        decoded = await admin.auth().verifyIdToken(idToken);
-      } catch (e) {
-        res.status(401).json({ error: "Token inválido" });
-        return;
-      }
-
-      const uid = decoded.uid;
-
-      // -------------------------------------------------
-      // 3. Verifica permissão (admin / revendedor)
-      // -------------------------------------------------
-      const userDoc = await db.collection("users").doc(uid).get();
-      const perfil = userDoc.data()?.isPerfil as string | undefined;
-
-      if (!["admin", "revendedor"].includes(perfil ?? "")) {
-        res.status(403).json({ error: "Permissão negada" });
-        return;
-      }
-
-      // -------------------------------------------------
-      // 4. Lê o catalogId do body
-      // -------------------------------------------------
-      const { catalogId } = req.body;
-      if (!catalogId) {
-        res.status(400).json({ error: "catalogId obrigatório" });
-        return;
-      }
-
-      // -------------------------------------------------
-      // 5. Cria o link temporário
-      // -------------------------------------------------
-      const linkId = db.collection("tempLinks").doc().id;
-      const expiresAt = admin.firestore.Timestamp.fromDate(
-        new Date(Date.now() + 24 * 60 * 60 * 1000) // 24h
-      );
-
-      await db.collection("tempLinks").doc(linkId).set({
-        catalogId,
-        createdBy: uid,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        expiresAt,
-      });
-
-      const link = `https://app-innovaro-showcase.web.app/share/${linkId}`;
-
-      // -------------------------------------------------
-      // 6. Responde com JSON (sem return)
-      // -------------------------------------------------
-      res.status(200).json({ link });
-    } catch (err: any) {
-      console.error("Erro inesperado:", err);
-      res.status(500).json({ error: err.message ?? "Erro interno" });
-    }
+  const userDoc = await db.collection("users").doc(auth.uid).get();
+  const perfil = userDoc.data()?.isPerfil as string | undefined;
+  if (!["admin", "revendedor"].includes(perfil ?? "")) {
+    throw new HttpsError("permission-denied", "Apenas admin/revendedor.");
   }
-);
+
+  const { catalogId } = data;
+  if (!catalogId) throw new HttpsError("invalid-argument", "catalogId obrigatório.");
+
+  const linkId = db.collection("tempLinks").doc().id;
+  const expiresAt = admin.firestore.Timestamp.fromDate(
+    new Date(Date.now() + 24 * 60 * 60 * 1000)
+  );
+
+  await db.collection("tempLinks").doc(linkId).set({
+    catalogId,
+    createdBy: auth.uid,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    expiresAt,
+  });
+
+  return {
+    link: `https://app-innovaro-showcase.web.app/share/${linkId}`
+  };
+});
 // ========================================
 // 2. BUSCAR CATÁLOGO POR LINK (PÚBLICO)
 // ========================================
