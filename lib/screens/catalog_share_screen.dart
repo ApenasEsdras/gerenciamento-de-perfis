@@ -26,7 +26,7 @@ class _CatalogShareScreenState extends State<CatalogShareScreen> {
   Future<void> _loadCatalog() async {
     try {
       final uri = Uri.https(
-        'southamerica-east1-seu-projeto.cloudfunctions.net',
+        'us-central1-app-innovaro-showcase.cloudfunctions.net',
         '/getCatalogByLink',
         {'linkId': widget.linkId},
       );
@@ -64,8 +64,8 @@ class _CatalogShareScreenState extends State<CatalogShareScreen> {
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
-              ? Center(child: Text(error!, style: const TextStyle(fontSize: 18)))
-              : _buildCatalog(),
+          ? Center(child: Text(error!, style: const TextStyle(fontSize: 18)))
+          : _buildCatalog(),
     );
   }
 
@@ -75,7 +75,10 @@ class _CatalogShareScreenState extends State<CatalogShareScreen> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          Text(catalog!['name'], style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+          Text(
+            catalog!['name'],
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 16),
           GridView.builder(
             shrinkWrap: true,
@@ -97,15 +100,21 @@ class _CatalogShareScreenState extends State<CatalogShareScreen> {
                         imageUrl: item['imageUrl'] ?? '',
                         fit: BoxFit.cover,
                         width: double.infinity,
-                        placeholder: (_, __) => const Center(child: CircularProgressIndicator()),
+                        placeholder: (_, __) =>
+                            const Center(child: CircularProgressIndicator()),
                       ),
                     ),
                     Padding(
                       padding: const EdgeInsets.all(8),
                       child: Column(
                         children: [
-                          Text(item['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          Text("R\$ ${(item['price'] as num).toStringAsFixed(2)}"),
+                          Text(
+                            item['name'] ?? '',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            "R\$ ${(item['price'] as num).toStringAsFixed(2)}",
+                          ),
                           Text("Tam: ${(item['sizes'] as List).join(', ')}"),
                         ],
                       ),

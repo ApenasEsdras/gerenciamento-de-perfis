@@ -1,10 +1,13 @@
 // screens/home_screen.dart
+import 'dart:convert';
+
 import 'package:appinncatalogo/screens/cadastro.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -37,32 +40,62 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _shareCatalog(String catalogId, String catalogName) async {
-    if (userRole != 'admin' && userRole != 'revendedor') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Você não tem permissão para compartilhar."),
-        ),
-      );
-      return;
-    }
+    final user = FirebaseAuth.instance.currentUser!;
+    final idToken = await user.getIdToken();
 
-    try {
-      final callable = FirebaseFunctions.instanceFor(
-        region: 'southamerica-east1',
-      ).httpsCallable('generateCatalogLink');
-      final result = await callable.call({'catalogId': catalogId});
-      final link = result.data['link'];
+    final uri = Uri.parse(
+      'https://us-central1-app-innovaro-showcase.cloudfunctions.net/generateCatalogLinkHttp',
+    );
+    
+    final response = await http.post(
+      uri,
+      headers: {
+        'Authorization': 'Bearer $idToken',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'catalogId': catalogId}),
+    );
 
+    if (response.statusCode == 200) {
+      final link = jsonDecode(response.body)['link'] as String;
       await Share.share(
         'Confira o catálogo *$catalogName*:\n\n$link\n\nVálido por 24h',
         subject: catalogName,
       );
-    } catch (e) {
+    } else {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("Erro: $e")));
+      ).showSnackBar(SnackBar(content: Text('Erro: ${response.body}')));
     }
   }
+
+  // Future<void> _shareCatalog(String catalogId, String catalogName) async {
+  //   if (userRole != 'admin' && userRole != 'revendedor') {
+  //     ScaffoldMessenger.of(context).showSnackBar(
+  //       const SnackBar(
+  //         content: Text("Você não tem permissão para compartilhar."),
+  //       ),
+  //     );
+  //     return;
+  //   }
+
+  //   try {
+  //     final callable = FirebaseFunctions.instanceFor(
+  //       region: 'southamerica-east1',
+  //     ).httpsCallable('generateCatalogLink');
+  //     final result = await callable.call({'catalogId': catalogId});
+  //     final link = result.data['link'];
+
+  //     await Share.share(
+  //       'Confira o catálogo *$catalogName*:\n\n$link\n\nVálido por 24h',
+  //       subject: catalogName,
+  //     );
+  //   } catch (e) {
+  //     ScaffoldMessenger.of(
+  //       context,
+  //     ).showSnackBar(SnackBar(content: Text("Erro: $e")));
+  //   }
+  // }
 
   @override
   Widget build(BuildContext context) {
