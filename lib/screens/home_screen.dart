@@ -5,10 +5,12 @@ import 'dart:convert';
 
 import 'package:appinncatalogo/screens/cadastro.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 
@@ -59,10 +61,61 @@ class _HomeScreenState extends State<HomeScreen> {
       final result = await callable.call({'catalogId': catalogId});
       final link = result.data['link'] as String;
 
-      await Share.share(
-        'Confira o catálogo *$catalogName*:\n\n$link\n\nVálido por 24h',
-        subject: catalogName,
-      );
+      // MENSAGEM PADRÃO
+      final message =
+          'Confira o catálogo *$catalogName*:\n\n$link\n\nVálido por 24h';
+
+      // PLATAFORMA: MOBILE → SHARE NATIVO
+      if (!kIsWeb) {
+        await Share.share(message, subject: catalogName);
+        return;
+      }
+
+      // PLATAFORMA: WEB → CAMPO + COPIAR
+      if (kIsWeb) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text("Link do Catálogo"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: TextEditingController(text: link),
+                  readOnly: true,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: "Link (clique em Copiar)",
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.copy),
+                    label: const Text("COPIAR LINK"),
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: link));
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text("Link copiado!")),
+                        );
+                        Navigator.of(ctx).pop();
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text("FECHAR"),
+              ),
+            ],
+          ),
+        );
+      }
     } on FirebaseFunctionsException catch (e) {
       String msg = e.message ?? "Erro ao gerar link.";
       if (e.code == 'permission-denied') msg = "Você não tem permissão.";
